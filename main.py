@@ -1,135 +1,227 @@
 import os
 import requests
 import openai
-from dotenv import load_dotenv
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
+from typing import List
+from datetime import datetime, timedelta
+from dotenv import load_dotenv
 
-# Load environment variables
+# —— Load secrets —— 
 load_dotenv()
+HUBSPOT_TOKEN   = os.getenv("HUBSPOT_TOKEN")
+OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
+client          = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-# Grab your tokens
-HUBSPOT_TOKEN = os.getenv("HUBSPOT_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-# OpenAI client
-client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
-# FastAPI app
 app = FastAPI()
 
-# —— NEW: response model —— 
-class SummaryResponse(BaseModel):
-    summary: str
+# —— Data models —— 
 
-# —— HubSpot + OpenAI logic —— 
+class ContactInfo(BaseModel):
+    id: str
+    firstname: str
+    lastname: str
+    email: str
+    jobtitle: str = None
 
-def get_contact(contact_email):
+class DealInfo(BaseModel):
+    id: str
+    name: str
+    amount: float
+    stage: str
+    closedate: datetime = None
+
+class EngagementInfo(BaseModel):
+    id: str
+    type: str
+    createdAt: datetime
+    subject: str = None
+
+class CompanyBrief(BaseModel):
+    id: str
+    name: str
+    domain: str
+    website: str = None
+    industry: str = None
+    account_status: str = None
+    lifecycle_stage: str = None
+
+    contacts:           List[ContactInfo]
+    deals_closed_won:   List[DealInfo]
+    deals_closed_lost:  List[DealInfo]
+    deals_expansion:    List[DealInfo]
+    deals_active:       List[DealInfo]
+    recent_engagements: List[EngagementInfo]
+
+class BriefResponse(BaseModel):
+    contact: ContactInfo
+    company: CompanyBrief
+
+# —— Helpers —— 
+
+def get_contact_by_email(email: str):
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
         "Content-Type": "application/json"
     }
     body = {
-        "filterGroups": [{
-            "filters": [{
-                "propertyName": "email",
-                "operator": "EQ",
-                "value": contact_email
-            }]
-        }],
-        "properties": ["firstname", "lastname", "email", "company"],
+        "filterGroups": [{"filters":[{"propertyName":"email","operator":"EQ","value":email}]}],
+        "properties": ["firstname","lastname","email","jobtitle"],
         "limit": 1
     }
-    res = requests.post(url, headers=headers, json=body)
-    res.raise_for_status()
-    results = res.json().get("results", [])
+    r = requests.post(url, headers=headers, json=body)
+    r.raise_for_status()
+    results = r.json().get("results", [])
     if not results:
-        raise Exception("No contact found.")
-    return results[0]
-
-def get_company(company_name):
-    url = "https://api.hubapi.com/crm/v3/objects/companies/search"
-    headers = {
-        "Authorization": f"Bearer {HUBSPOT_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    body = {
-        "filterGroups": [{
-            "filters": [{
-                "propertyName": "name",
-                "operator": "EQ",
-                "value": company_name
-            }]
-        }],
-        "properties": ["name", "website", "industry", "description"],
-        "limit": 1
-    }
-    res = requests.post(url, headers=headers, json=body)
-    res.raise_for_status()
-    results = res.json().get("results", [])
-    return results[0] if results else {}
-
-def summarize_contact_and_company(contact, company):
-    contact_info = f"""
-    Name: {contact['properties'].get('firstname')} {contact['properties'].get('lastname')}
-    Email: {contact['properties'].get('email')}
-    Company: {contact['properties'].get('company')}
-    """
-    company_info = f"""
-    Company Info:
-    Name: {company.get('properties', {}).get('name')}
-    Website: {company.get('properties', {}).get('website')}
-    Industry: {company.get('properties', {}).get('industry')}
-    Description: {company.get('properties', {}).get('description')}
-    """
-    prompt = f"""
-    Summarize the following contact and company information for a sales rep:
-
-    {contact_info}
-    {company_info}
-
-    Include what the company does, what the contact's likely role is, and how to best approach them.
-    """
-    response = client.chat.completions.create(
-        model="gpt-4-1106-preview",
-        messages=[{"role": "user", "content": prompt}]
+        raise HTTPException(404, "Contact not found")
+    c = results[0]
+    p = c["properties"]
+    return ContactInfo(
+        id=c["id"],
+        firstname=p.get("firstname",""),
+        lastname=p.get("lastname",""),
+        email=p.get("email",""),
+        jobtitle=p.get("jobtitle")
     )
-    return response.choices[0].message.content.strip()
 
-# —— UPDATED endpoint to use the new model —— 
-@app.get("/summarize-contact", response_model=SummaryResponse)
-def summarize_contact(email: str = Query(..., description="Email of the contact")):
-    try:
-        contact = get_contact(email)
-        company_name = contact["properties"].get("company", "")
-        company = get_company(company_name) if company_name else {}
-        summary_text = summarize_contact_and_company(contact, company)
-        return SummaryResponse(summary=summary_text)
-    except Exception as e:
-        return SummaryResponse(summary="Error: " + str(e))
-
-# —— Plugin routes —— 
-@app.get("/logo.png")
-def logo():
-    return HTMLResponse('<img src="https://via.placeholder.com/100" alt="logo">')
-
-@app.get("/legal", response_class=HTMLResponse)
-def legal():
-    return "<p>This plugin is for internal use only. No data is stored.</p>"
-
-@app.get("/.well-known/ai-plugin.json")
-def serve_manifest():
-    return {
-        "schema_version": "v1",
-        "name_for_human": "HubSpot Summarizer",
-        "name_for_model": "hubspot_summary",
-        "description_for_human": "Summarize contacts from HubSpot by email address.",
-        "description_for_model": "Use this tool to retrieve and summarize contact and company information from HubSpot using an email address.",
-        "auth": {"type": "none"},
-        "api": {"type": "openapi", "url": "https://hubspot-chatgpt-plugin.onrender.com/openapi.json"},
-        "logo_url": "https://hubspot-chatgpt-plugin.onrender.com/logo.png",
-        "contact_email": "you@example.com",
-        "legal_info_url": "https://hubspot-chatgpt-plugin.onrender.com/legal"
+def get_company_by_domain(domain: str):
+    url = "https://api.hubapi.com/crm/v3/objects/companies/search"
+    headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}","Content-Type":"application/json"}
+    body = {
+        "filterGroups":[{"filters":[{"propertyName":"domain","operator":"EQ","value":domain}]}],
+        "properties":["name","website","industry","lifecyclestage","2025_account_status"],
+        "limit":1
     }
+    r = requests.post(url, headers=headers, json=body)
+    r.raise_for_status()
+    res = r.json().get("results", [])
+    if not res:
+        raise HTTPException(404, "Company not found")
+    c = res[0]; p = c["properties"]
+    return {
+        "id":              c["id"],
+        "name":            p.get("name"),
+        "domain":          domain,
+        "website":         p.get("website"),
+        "industry":        p.get("industry"),
+        "lifecycle_stage": p.get("lifecyclestage"),
+        "account_status":  p.get("2025_account_status")
+    }
+
+def get_associated_contacts(company_id: str):
+    url = f"https://api.hubapi.com/crm/v3/objects/companies/{company_id}/associations/contacts"
+    headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}"}
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
+    contacts = []
+    for assoc in r.json().get("results", []):
+        cid = assoc["id"]
+        cr = requests.get(
+            f"https://api.hubapi.com/crm/v3/objects/contacts/{cid}",
+            headers=headers,
+            params={"properties":"firstname,lastname,email,jobtitle"}
+        )
+        cr.raise_for_status()
+        p = cr.json()["properties"]
+        contacts.append(ContactInfo(
+            id=cid,
+            firstname=p.get("firstname",""),
+            lastname=p.get("lastname",""),
+            email=p.get("email",""),
+            jobtitle=p.get("jobtitle")
+        ))
+    return contacts
+
+def get_all_deals_for_company(company_id: str):
+    url = "https://api.hubapi.com/crm/v3/objects/deals/search"
+    headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}", "Content-Type":"application/json"}
+    # past 3 years:
+    cutoff = int((datetime.utcnow() - timedelta(days=365*3)).timestamp()*1000)
+    body = {
+        "filterGroups":[{"filters":[
+            {"propertyName":"associations.company","operator":"EQ","value":company_id},
+            {"propertyName":"closedate","operator":"GTE","value":cutoff}
+        ]}],
+        "properties":["dealname","amount","dealstage","closedate"],
+        "limit":100
+    }
+    r = requests.post(url, headers=headers, json=body)
+    r.raise_for_status()
+    deals = []
+    for d in r.json().get("results",[]):
+        p = d["properties"]
+        cd = p.get("closedate")
+        deals.append(DealInfo(
+            id=d["id"],
+            name=p.get("dealname",""),
+            amount=float(p.get("amount",0)),
+            stage=p.get("dealstage",""),
+            closedate=datetime.fromtimestamp(int(cd)/1000) if cd else None
+        ))
+    return deals
+
+def get_recent_engagements(company_id: str, limit:int=10):
+    url = "https://api.hubapi.com/crm/v3/objects/engagements/search"
+    headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}", "Content-Type":"application/json"}
+    body = {
+        "filterGroups":[{"filters":[
+            {"propertyName":"associations.company","operator":"EQ","value":company_id},
+            {"propertyName":"engagement.type","operator":"IN","value":["CALL","MEETING","EMAIL"]}
+        ]}],
+        "properties":["engagement.type","createdAt","metadata.subject"],
+        "sorts":["-createdAt"],
+        "limit":limit
+    }
+    r = requests.post(url, headers=headers, json=body)
+    r.raise_for_status()
+    engs = []
+    for e in r.json().get("results",[]):
+        p = e["properties"]
+        engs.append(EngagementInfo(
+            id=e["id"],
+            type=p.get("engagement.type",""),
+            createdAt=datetime.fromisoformat(p.get("createdAt")),
+            subject=p.get("metadata.subject")
+        ))
+    return engs
+
+# —— Single “brief” endpoint —— 
+
+@app.get("/brief", response_model=BriefResponse)
+def brief(
+    email:  str = Query(..., description="Contact email"),
+    domain: str = Query(..., description="Firm domain, e.g. examplelaw.com")
+):
+    # 1) Contact
+    contact = get_contact_by_email(email)
+
+    # 2) Company internal history
+    comp_data = get_company_by_domain(domain)
+    cid = comp_data["id"]
+
+    # 3) Contacts at firm
+    contacts = get_associated_contacts(cid)
+
+    # 4) Deals
+    all_deals    = get_all_deals_for_company(cid)
+    closed_won   = [d for d in all_deals if d.stage=="closedwon"]
+    closed_lost  = [d for d in all_deals if d.stage=="closedlost"]
+    expansion    = [d for d in all_deals if d.stage=="expansion"]
+    active_deals = [d for d in all_deals if d.stage not in ("closedwon","closedlost","expansion")]
+
+    # 5) Recent activity
+    engs = get_recent_engagements(cid)
+
+    company_brief = CompanyBrief(
+        id=cid,
+        name=comp_data["name"],
+        domain=comp_data["domain"],
+        website=comp_data["website"],
+        industry=comp_data["industry"],
+        account_status=comp_data["account_status"],
+        lifecycle_stage=comp_data["lifecycle_stage"],
+        contacts=contacts,
+        deals_closed_won=closed_won,
+        deals_closed_lost=closed
