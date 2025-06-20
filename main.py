@@ -1,4 +1,3 @@
-
 import os
 import requests
 import openai
@@ -7,17 +6,24 @@ from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-
+# Load environment variables
 load_dotenv()
 
+# Grab your tokens
 HUBSPOT_TOKEN = os.getenv("HUBSPOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+# OpenAI client
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
+# FastAPI app
 app = FastAPI()
+
+# —— NEW: response model —— 
 class SummaryResponse(BaseModel):
     summary: str
 
+# —— HubSpot + OpenAI logic —— 
 
 def get_contact(contact_email):
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
@@ -86,24 +92,32 @@ def summarize_contact_and_company(contact, company):
 
     Include what the company does, what the contact's likely role is, and how to best approach them.
     """
-
     response = client.chat.completions.create(
         model="gpt-4-1106-preview",
         messages=[{"role": "user", "content": prompt}]
     )
-
     return response.choices[0].message.content.strip()
 
+# —— UPDATED endpoint to use the new model —— 
 @app.get("/summarize-contact", response_model=SummaryResponse)
-def summarize_contact(email: str = Query(...)):
+def summarize_contact(email: str = Query(..., description="Email of the contact")):
     try:
         contact = get_contact(email)
         company_name = contact["properties"].get("company", "")
         company = get_company(company_name) if company_name else {}
-        summary = summarize_contact_and_company(contact, company)
-        return {"summary": summary}
+        summary_text = summarize_contact_and_company(contact, company)
+        return SummaryResponse(summary=summary_text)
     except Exception as e:
-        return {"error": str(e)}
+        return SummaryResponse(summary="Error: " + str(e))
+
+# —— Plugin routes —— 
+@app.get("/logo.png")
+def logo():
+    return HTMLResponse('<img src="https://via.placeholder.com/100" alt="logo">')
+
+@app.get("/legal", response_class=HTMLResponse)
+def legal():
+    return "<p>This plugin is for internal use only. No data is stored.</p>"
 
 @app.get("/.well-known/ai-plugin.json")
 def serve_manifest():
@@ -113,14 +127,9 @@ def serve_manifest():
         "name_for_model": "hubspot_summary",
         "description_for_human": "Summarize contacts from HubSpot by email address.",
         "description_for_model": "Use this tool to retrieve and summarize contact and company information from HubSpot using an email address.",
-        "auth": {
-            "type": "none"
-        },
-        "api": {
-            "type": "openapi",
-            "url": "https://RENDER-URL/openapi.json"
-        },
-        "logo_url": "https://RENDER-URL/logo.png",
+        "auth": {"type": "none"},
+        "api": {"type": "openapi", "url": "https://hubspot-chatgpt-plugin.onrender.com/openapi.json"},
+        "logo_url": "https://hubspot-chatgpt-plugin.onrender.com/logo.png",
         "contact_email": "you@example.com",
-        "legal_info_url": "https://RENDER-URL/legal"
+        "legal_info_url": "https://hubspot-chatgpt-plugin.onrender.com/legal"
     }
