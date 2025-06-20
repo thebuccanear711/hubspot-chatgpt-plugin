@@ -60,14 +60,20 @@ class BriefResponse(BaseModel):
 
 # —— Helpers —— 
 
-def get_contact_by_email(email: str):
+def get_contact_by_email(email: str) -> ContactInfo:
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
         "Content-Type": "application/json"
     }
     body = {
-        "filterGroups": [{"filters":[{"propertyName":"email","operator":"EQ","value":email}]}],
+        "filterGroups": [{
+            "filters": [{
+                "propertyName":"email",
+                "operator":"EQ",
+                "value":email
+            }]
+        }],
         "properties": ["firstname","lastname","email","jobtitle"],
         "limit": 1
     }
@@ -86,12 +92,21 @@ def get_contact_by_email(email: str):
         jobtitle=p.get("jobtitle")
     )
 
-def get_company_by_domain(domain: str):
+def get_company_by_domain(domain: str) -> dict:
     url = "https://api.hubapi.com/crm/v3/objects/companies/search"
-    headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}","Content-Type":"application/json"}
+    headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}", "Content-Type":"application/json"}
     body = {
-        "filterGroups":[{"filters":[{"propertyName":"domain","operator":"EQ","value":domain}]}],
-        "properties":["name","website","industry","lifecyclestage","2025_account_status"],
+        "filterGroups": [{
+            "filters": [{
+                "propertyName":"domain",
+                "operator":"EQ",
+                "value":domain
+            }]
+        }],
+        "properties": [
+            "name","website","industry",
+            "lifecyclestage","2025_account_status"
+        ],
         "limit":1
     }
     r = requests.post(url, headers=headers, json=body)
@@ -101,16 +116,16 @@ def get_company_by_domain(domain: str):
         raise HTTPException(404, "Company not found")
     c = res[0]; p = c["properties"]
     return {
-        "id":              c["id"],
-        "name":            p.get("name"),
-        "domain":          domain,
-        "website":         p.get("website"),
-        "industry":        p.get("industry"),
+        "id": c["id"],
+        "name": p.get("name"),
+        "domain": domain,
+        "website": p.get("website"),
+        "industry": p.get("industry"),
         "lifecycle_stage": p.get("lifecyclestage"),
-        "account_status":  p.get("2025_account_status")
+        "account_status": p.get("2025_account_status")
     }
 
-def get_associated_contacts(company_id: str):
+def get_associated_contacts(company_id: str) -> List[ContactInfo]:
     url = f"https://api.hubapi.com/crm/v3/objects/companies/{company_id}/associations/contacts"
     headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}"}
     r = requests.get(url, headers=headers)
@@ -134,23 +149,24 @@ def get_associated_contacts(company_id: str):
         ))
     return contacts
 
-def get_all_deals_for_company(company_id: str):
+def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     url = "https://api.hubapi.com/crm/v3/objects/deals/search"
     headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}", "Content-Type":"application/json"}
-    # past 3 years:
     cutoff = int((datetime.utcnow() - timedelta(days=365*3)).timestamp()*1000)
     body = {
-        "filterGroups":[{"filters":[
-            {"propertyName":"associations.company","operator":"EQ","value":company_id},
-            {"propertyName":"closedate","operator":"GTE","value":cutoff}
-        ]}],
+        "filterGroups": [{
+            "filters": [
+                {"propertyName":"associations.company","operator":"EQ","value":company_id},
+                {"propertyName":"closedate","operator":"GTE","value":cutoff}
+            ]
+        }],
         "properties":["dealname","amount","dealstage","closedate"],
         "limit":100
     }
     r = requests.post(url, headers=headers, json=body)
     r.raise_for_status()
     deals = []
-    for d in r.json().get("results",[]):
+    for d in r.json().get("results", []):
         p = d["properties"]
         cd = p.get("closedate")
         deals.append(DealInfo(
@@ -162,14 +178,16 @@ def get_all_deals_for_company(company_id: str):
         ))
     return deals
 
-def get_recent_engagements(company_id: str, limit:int=10):
+def get_recent_engagements(company_id: str, limit:int=10) -> List[EngagementInfo]:
     url = "https://api.hubapi.com/crm/v3/objects/engagements/search"
     headers = {"Authorization":f"Bearer {HUBSPOT_TOKEN}", "Content-Type":"application/json"}
     body = {
-        "filterGroups":[{"filters":[
-            {"propertyName":"associations.company","operator":"EQ","value":company_id},
-            {"propertyName":"engagement.type","operator":"IN","value":["CALL","MEETING","EMAIL"]}
-        ]}],
+        "filterGroups":[{
+            "filters": [
+                {"propertyName":"associations.company","operator":"EQ","value":company_id},
+                {"propertyName":"engagement.type","operator":"IN","value":["CALL","MEETING","EMAIL"]}
+            ]
+        }],
         "properties":["engagement.type","createdAt","metadata.subject"],
         "sorts":["-createdAt"],
         "limit":limit
@@ -177,7 +195,7 @@ def get_recent_engagements(company_id: str, limit:int=10):
     r = requests.post(url, headers=headers, json=body)
     r.raise_for_status()
     engs = []
-    for e in r.json().get("results",[]):
+    for e in r.json().get("results", []):
         p = e["properties"]
         engs.append(EngagementInfo(
             id=e["id"],
@@ -194,25 +212,16 @@ def brief(
     email:  str = Query(..., description="Contact email"),
     domain: str = Query(..., description="Firm domain, e.g. examplelaw.com")
 ):
-    # 1) Contact
     contact = get_contact_by_email(email)
-
-    # 2) Company internal history
-    comp_data = get_company_by_domain(domain)
-    cid = comp_data["id"]
-
-    # 3) Contacts at firm
-    contacts = get_associated_contacts(cid)
-
-    # 4) Deals
-    all_deals    = get_all_deals_for_company(cid)
-    closed_won   = [d for d in all_deals if d.stage=="closedwon"]
-    closed_lost  = [d for d in all_deals if d.stage=="closedlost"]
-    expansion    = [d for d in all_deals if d.stage=="expansion"]
-    active_deals = [d for d in all_deals if d.stage not in ("closedwon","closedlost","expansion")]
-
-    # 5) Recent activity
-    engs = get_recent_engagements(cid)
+    comp_data   = get_company_by_domain(domain)
+    cid         = comp_data["id"]
+    contacts    = get_associated_contacts(cid)
+    all_deals   = get_all_deals_for_company(cid)
+    closed_won  = [d for d in all_deals if d.stage=="closedwon"]
+    closed_lost = [d for d in all_deals if d.stage=="closedlost"]
+    expansion   = [d for d in all_deals if d.stage=="expansion"]
+    active_deals= [d for d in all_deals if d.stage not in ("closedwon","closedlost","expansion")]
+    engs        = get_recent_engagements(cid)
 
     company_brief = CompanyBrief(
         id=cid,
@@ -224,4 +233,35 @@ def brief(
         lifecycle_stage=comp_data["lifecycle_stage"],
         contacts=contacts,
         deals_closed_won=closed_won,
-        deals_closed_lost=closed
+        deals_closed_lost=closed_lost,
+        deals_expansion=expansion,
+        deals_active=active_deals,
+        recent_engagements=engs
+    )
+
+    return BriefResponse(contact=contact, company=company_brief)
+
+# —— Plugin manifest & support routes —— 
+
+@app.get("/.well-known/ai-plugin.json")
+def serve_manifest():
+    return {
+        "schema_version":"v1",
+        "name_for_human":"HubSpot Briefing",
+        "name_for_model":"hubspot_briefing",
+        "description_for_human":"Fetch internal HubSpot history for a given contact & firm.",
+        "description_for_model":"Call /brief to get our account status, deals, and activities.",
+        "auth": {"type":"none"},
+        "api": {"type":"openapi","url":"https://YOUR_RENDER_URL/.well-known/openapi.json"},
+        "logo_url":"https://YOUR_RENDER_URL/logo.png",
+        "contact_email":"you@example.com",
+        "legal_info_url":"https://YOUR_RENDER_URL/legal"
+    }
+
+@app.get("/logo.png")
+def logo():
+    return HTMLResponse('<img src="https://via.placeholder.com/100" alt="logo">')
+
+@app.get("/legal", response_class=HTMLResponse)
+def legal():
+    return "<p>This plugin stores no data and is for internal use only.</p>"
