@@ -5,6 +5,8 @@ import openai
 from dotenv import load_dotenv
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
+
 
 load_dotenv()
 
@@ -13,6 +15,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
 app = FastAPI()
+class SummaryResponse(BaseModel):
+    summary: str
+
 
 def get_contact(contact_email):
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
@@ -89,7 +94,7 @@ def summarize_contact_and_company(contact, company):
 
     return response.choices[0].message.content.strip()
 
-@app.get("/summarize-contact")
+@app.get("/summarize-contact", response_model=SummaryResponse)
 def summarize_contact(email: str = Query(...)):
     try:
         contact = get_contact(email)
