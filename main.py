@@ -291,9 +291,9 @@ def serve_manifest():
             "type":"openapi",
             "url":"https://hubspot-chatgpt-pulgin.onrender.com/.well-known/openapi.json"
         },
-        "logo_url":"https://hubspot-chatgpt-pulgin.onrender.com/logo.png",
+        "logo_url":"https://hubspot-chatgpt-plugin.onrender.com/logo.png",
         "contact_email":"you@example.com",
-        "legal_info_url":"https://hubspot-chatgpt-pulgin.onrender.com/legal"
+        "legal_info_url":"https://hubspot-chatgpt-plugin.onrender.com/legal"
     }
 
 @app.get("/logo.png")
@@ -303,3 +303,9 @@ def logo():
 @app.get("/legal", response_class=HTMLResponse)
 def legal():
     return "<p>This plugin stores no data and is for internal use only.</p>"
+
+# —— Compatibility route for ChatGPT plugin UI ——
+@app.get("/openapi.json")
+def openapi_redirect():
+    return custom_openapi()
+
