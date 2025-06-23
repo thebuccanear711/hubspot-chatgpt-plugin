@@ -289,7 +289,7 @@ def serve_manifest():
         "auth": {"type":"none"},
         "api": {
             "type":"openapi",
-            "url":"https://hubspot-chatgpt-pulgin.onrender.com/.well-known/openapi.json"
+            "url":"https://hubspot-chatgpt-plugin.onrender.com/.well-known/openapi.json"
         },
         "logo_url":"https://hubspot-chatgpt-plugin.onrender.com/logo.png",
         "contact_email":"you@example.com",
