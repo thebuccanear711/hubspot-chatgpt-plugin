@@ -2,51 +2,36 @@
   "openapi": "3.0.0",
   "info": {
     "title": "HubSpot ChatGPT Plugin",
-    "version": "1.0.0"
+    "version": "1.0.0",
+    "description": "Fetch internal HubSpot history for a given contact & firm."
   },
   "paths": {
-    "/deals/company": {
+    "/brief": {
       "get": {
-        "summary": "Get deals by company name",
+        "summary": "Get a full HubSpot briefing by contact email and firm domain",
         "parameters": [
           {
-            "name": "company_name",
+            "name": "email",
             "in": "query",
+            "description": "The contact's email address",
             "required": true,
             "schema": { "type": "string" }
           },
           {
-            "name": "status",
+            "name": "domain",
             "in": "query",
+            "description": "The company’s website domain",
             "required": true,
-            "schema": {
-              "type": "array",
-              "items": { "type": "string" }
-            },
-            "style": "form",
-            "explode": true
-          },
-          {
-            "name": "start_date",
-            "in": "query",
-            "required": true,
-            "schema": { "type": "string", "format": "date" }
-          },
-          {
-            "name": "end_date",
-            "in": "query",
-            "required": true,
-            "schema": { "type": "string", "format": "date" }
+            "schema": { "type": "string" }
           }
         ],
         "responses": {
           "200": {
-            "description": "List of deals",
+            "description": "Briefing object including contact, company, deals, and engagements",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "type": "object" }
+                  "type": "object"
                 }
               }
             }
