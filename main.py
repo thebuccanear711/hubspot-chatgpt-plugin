@@ -210,7 +210,8 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
             name=p.get("dealname",""),
             amount=float(p.get("amount",0)),
             stage=p.get("dealstage",""),
-            closedate=datetime.fromtimestamp(int(cd)/1000) if cd else None
+            closedate=datetime.fromisoformat(cd.replace("Z", "")) if cd else None
+
         ))
     return deals
 
