@@ -219,6 +219,7 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     return deals
 
 def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementInfo]:
+    print(f"Getting recent engagements for company ID: {company_id}")
     url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged?limit={limit}"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
@@ -260,6 +261,7 @@ def brief(
     expansion   = [d for d in all_deals if d.stage == "expansion"]
     active_deals= [d for d in all_deals if d.stage not in ("closedwon","closedlost","expansion")]
     engs        = get_recent_engagements(cid)
+    print("Retrieved engagements:", engagements)
 
     company_brief = CompanyBrief(
         id=cid,
