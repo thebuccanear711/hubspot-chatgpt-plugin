@@ -216,7 +216,7 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     return deals
 
 def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementInfo]:
-    url = "https://api.hubapi.com/crm/v3/objects/engagements/search"
+    url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged?limit=10"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
         "Content-Type": "application/json"
