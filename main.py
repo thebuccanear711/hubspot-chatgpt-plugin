@@ -170,15 +170,15 @@ def get_associated_contacts(company_id: str) -> List[ContactInfo]:
         cr.raise_for_status()
         p = cr.json()["properties"]
         email = p.get("email")
-if not email:
-    print(f"Skipping contact with missing email: {cid}")
-    continue
-contacts.append(ContactInfo(
-    id=cid,
-    firstname=p.get("firstname",""),
-    lastname=p.get("lastname",""),
-    email=email,
-    jobtitle=p.get("jobtitle")
+        if not email:
+            print(f"Skipping contact with missing email: {cid}")
+            continue
+        contacts.append(ContactInfo(
+            id=cid,
+            firstname=p.get("firstname",""),
+            lastname=p.get("lastname",""),
+            email=email,
+            jobtitle=p.get("jobtitle")
 ))
 return contacts
 
