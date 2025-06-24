@@ -216,33 +216,28 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     return deals
 
 def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementInfo]:
-    url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged?limit=10"
+    url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged?limit={limit}"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
         "Content-Type": "application/json"
     }
-    body = {
-        "filterGroups": [{
-            "filters": [
-                {"propertyName":"associations.company","operator":"EQ","value":company_id},
-                {"propertyName":"engagement.type","operator":"IN","value":["CALL","MEETING","EMAIL"]}
-            ]
-        }],
-        "properties":["engagement.type","createdAt","metadata.subject"],
-        "sorts":["-createdAt"],
-        "limit": limit
-    }
+
     r = requests.get(url, headers=headers)
     r.raise_for_status()
+    data = r.json()
+
     engs = []
-    for e in r.json().get("results", []):
-        p = e["properties"]
+    for e in data.get("results", []):
+        eng = e.get("engagement", {})
+        meta = e.get("metadata", {})
+
         engs.append(EngagementInfo(
-            id=e["id"],
-            type=p.get("engagement.type",""),
-            createdAt=datetime.fromisoformat(p.get("createdAt")),
-            subject=p.get("metadata.subject")
+            id=str(eng.get("id")),
+            type=eng.get("type", ""),
+            createdAt=datetime.fromtimestamp(eng.get("timestamp") / 1000.0) if eng.get("timestamp") else None,
+            subject=meta.get("subject", "")
         ))
+
     return engs
 
 # —— Single “brief” endpoint —— 
