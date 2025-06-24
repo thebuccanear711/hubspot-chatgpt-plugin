@@ -180,7 +180,7 @@ contacts.append(ContactInfo(
     email=email,
     jobtitle=p.get("jobtitle")
 ))
-    return contacts
+return contacts
 
 def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     url = "https://api.hubapi.com/crm/v3/objects/deals/search"
