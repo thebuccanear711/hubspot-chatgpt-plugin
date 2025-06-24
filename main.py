@@ -176,10 +176,10 @@ def get_associated_contacts(company_id: str) -> List[ContactInfo]:
             continue
         contacts.append(ContactInfo(
             id=cid,
-            firstname=p.get("firstname", ""),
-            lastname=p.get("lastname", ""),
+            firstname=p.get("firstname") or "",
+            lastname=p.get("lastname") or "",
             email=email,
-            jobtitle=p.get("jobtitle")
+            jobtitle=p.get("jobtitle") or ""
         ))
 
     return contacts
