@@ -260,17 +260,17 @@ def brief(
 
     company_brief = CompanyBrief(
         id=cid,
-        name=comp_data["name"],
-        domain=comp_data["domain"],
-        website=comp_data["website"],
-        industry=comp_data["industry"],
-        account_status=comp_data["account_status"],
-        lifecycle_stage=comp_data["lifecycle_stage"],
+        name=c["name"],
+        domain=c["properties"].get("domain", ""),
+        website=c["properties"].get("website", ""),
+        industry=c["properties"].get("industry", ""),
+        account_status=c["properties"].get("hs_account_status", "") or "",  # fallback
+        lifecycle_stage=c["properties"].get("lifecyclestage", ""),
         contacts=contacts,
         deals_closed_won=closed_won,
         deals_closed_lost=closed_lost,
         deals_expansion=expansion,
-        deals_active=active_deals,
+        deals_active=active,
         recent_engagements=engs
     )
 
