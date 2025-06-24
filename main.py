@@ -5,7 +5,7 @@ from fastapi import FastAPI, Query, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
@@ -35,7 +35,7 @@ def custom_openapi():
     )
     # ← your real Render URL below:
     schema["servers"] = [
-        {"url": "https://hubspot-chatgpt-pulgin.onrender.com", "description": "Primary API server"}
+        {"url": "https://hubspot-chatgpt-plugin.onrender.com", "description": "Primary API server"}
     ]
     app.openapi_schema = schema
     return schema
@@ -48,8 +48,8 @@ class ContactInfo(BaseModel):
     id: str
     firstname: str
     lastname: str
-    email: str
-    jobtitle: str = None
+    email: Optional[str]
+    jobtitle: Optional[str] = None
 
 class DealInfo(BaseModel):
     id: str
@@ -169,13 +169,17 @@ def get_associated_contacts(company_id: str) -> List[ContactInfo]:
         )
         cr.raise_for_status()
         p = cr.json()["properties"]
-        contacts.append(ContactInfo(
-            id=cid,
-            firstname=p.get("firstname",""),
-            lastname=p.get("lastname",""),
-            email=p.get("email",""),
-            jobtitle=p.get("jobtitle")
-        ))
+        email = p.get("email")
+if not email:
+    print(f"Skipping contact with missing email: {cid}")
+    continue
+contacts.append(ContactInfo(
+    id=cid,
+    firstname=p.get("firstname",""),
+    lastname=p.get("lastname",""),
+    email=email,
+    jobtitle=p.get("jobtitle")
+))
     return contacts
 
 def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
