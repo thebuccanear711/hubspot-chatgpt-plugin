@@ -261,7 +261,7 @@ def brief(
     expansion   = [d for d in all_deals if d.stage == "expansion"]
     active_deals= [d for d in all_deals if d.stage not in ("closedwon","closedlost","expansion")]
     engs        = get_recent_engagements(cid)
-    print("Retrieved engagements:", engagements)
+    print("Retrieved engagements:", engs)
 
     company_brief = CompanyBrief(
         id=cid,
