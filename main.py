@@ -68,10 +68,10 @@ class CompanyBrief(BaseModel):
     id: str
     name: str
     domain: str
-    website: str = None
-    industry: str = None
-    account_status: str = None
-    lifecycle_stage: str = None
+    website: Optional[str] = None
+    industry: Optional[str] = None
+    account_status: Optional[str] = None
+    lifecycle_stage: Optional[str] = None
 
     contacts:           List[ContactInfo]
     deals_closed_won:   List[DealInfo]
@@ -180,7 +180,7 @@ def get_associated_contacts(company_id: str) -> List[ContactInfo]:
             email=email,
             jobtitle=p.get("jobtitle")
 ))
-        return contacts
+    return contacts
 
 def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     url = "https://api.hubapi.com/crm/v3/objects/deals/search"
@@ -260,17 +260,17 @@ def brief(
 
     company_brief = CompanyBrief(
         id=cid,
-        name=c["name"],
-        domain=c["properties"].get("domain", ""),
-        website=c["properties"].get("website", ""),
-        industry=c["properties"].get("industry", ""),
-        account_status=c["properties"].get("hs_account_status", "") or "",  # fallback
-        lifecycle_stage=c["properties"].get("lifecyclestage", ""),
+        name=comp_data["name"],
+        domain=comp_data["domain"],
+        website=comp_data.get("website", ""),
+        industry=comp_data.get("industry", ""),
+        account_status=comp_data.get("account_status", "") or "",
+        lifecycle_stage=comp_data.get("lifecycle_stage", ""),
         contacts=contacts,
         deals_closed_won=closed_won,
         deals_closed_lost=closed_lost,
         deals_expansion=expansion,
-        deals_active=active,
+        deals_active=active_deals,
         recent_engagements=engs
     )
 
