@@ -232,7 +232,7 @@ def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementI
         "sorts":["-createdAt"],
         "limit": limit
     }
-    r = requests.post(url, headers=headers, json=body)
+    r = requests.get(url, headers=headers)
     r.raise_for_status()
     engs = []
     for e in r.json().get("results", []):
