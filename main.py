@@ -159,13 +159,14 @@ def get_associated_contacts(company_id: str) -> List[ContactInfo]:
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}"}
     r = requests.get(url, headers=headers)
     r.raise_for_status()
+
     contacts = []
     for assoc in r.json().get("results", []):
         cid = assoc["id"]
         cr = requests.get(
             f"https://api.hubapi.com/crm/v3/objects/contacts/{cid}",
             headers=headers,
-            params={"properties":"firstname,lastname,email,jobtitle"}
+            params={"properties": "firstname,lastname,email,jobtitle"}
         )
         cr.raise_for_status()
         p = cr.json()["properties"]
@@ -175,12 +176,13 @@ def get_associated_contacts(company_id: str) -> List[ContactInfo]:
             continue
         contacts.append(ContactInfo(
             id=cid,
-            firstname=p.get("firstname") or "",
-            lastname=p.get("lastname") or "",
+            firstname=p.get("firstname", ""),
+            lastname=p.get("lastname", ""),
             email=email,
             jobtitle=p.get("jobtitle")
-))
- return contacts
+        ))
+
+    return contacts
 
 def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     url = "https://api.hubapi.com/crm/v3/objects/deals/search"
