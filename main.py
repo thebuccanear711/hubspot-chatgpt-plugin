@@ -105,6 +105,7 @@ def get_contact_by_email(email: str) -> ContactInfo:
     }
     r = requests.post(url, headers=headers, json=body)
     r.raise_for_status()
+    print("RAW engagement response:", r.json())
     results = r.json().get("results", [])
     if not results:
         raise HTTPException(404, "Contact not found")
