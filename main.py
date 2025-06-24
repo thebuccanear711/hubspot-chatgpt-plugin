@@ -64,6 +64,9 @@ class EngagementInfo(BaseModel):
     createdAt: datetime
     subject: str = None
 
+    def __str__(self):
+        return f"{self.createdAt.strftime('%b %d, %Y')} – {self.type} – {self.subject or 'No subject'}"
+
 class CompanyBrief(BaseModel):
     id: str
     name: str
@@ -79,6 +82,7 @@ class CompanyBrief(BaseModel):
     deals_expansion:    List[DealInfo]
     deals_active:       List[DealInfo]
     recent_engagements: List[EngagementInfo]
+    formatted_engagements: Optional[List[str]] = None
 
 class BriefResponse(BaseModel):
     contact: ContactInfo
@@ -244,6 +248,16 @@ def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementI
 
     return engs
 
+
+def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> List[str]:
+    summary = []
+    for e in sorted(engs, key=lambda x: x.createdAt, reverse=True)[:limit]:
+        date_str = e.createdAt.strftime('%b %d, %Y') if e.createdAt else "Unknown date"
+        subject = e.subject.strip() if e.subject else "No subject"
+        summary.append(f"{date_str} – {e.type.title()} – {subject}")
+    return summary
+
+
 # —— Single “brief” endpoint —— 
 
 @app.get("/brief", response_model=BriefResponse)
@@ -261,7 +275,14 @@ def brief(
     expansion   = [d for d in all_deals if d.stage == "expansion"]
     active_deals= [d for d in all_deals if d.stage not in ("closedwon","closedlost","expansion")]
     engs        = get_recent_engagements(cid)
-    print("Retrieved engagements:", engs)
+    formatted_engagements = format_engagement_summary(engs)
+    print("Formatted Engagements:\n", "\n".join(formatted_engagements))
+    for e in engs:
+        if not e.subject:
+            e.subject = "(no subject logged)"
+        e.type = e.type.title()  # e.g., "Call" instead of "CALL"
+    print("Retrieved Engagements:\n", *engs, sep="\n")
+
 
     company_brief = CompanyBrief(
         id=cid,
@@ -276,7 +297,8 @@ def brief(
         deals_closed_lost=closed_lost,
         deals_expansion=expansion,
         deals_active=active_deals,
-        recent_engagements=engs
+        recent_engagements=engs,
+        formatted_engagements=formatted_engagements
     )
 
     return BriefResponse(contact=contact, company=company_brief)
