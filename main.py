@@ -1,4 +1,7 @@
 import os
+print("⚡️ Starting HubSpot Briefing service…")
+print("HUBSPOT_TOKEN loaded?", bool(os.getenv("HUBSPOT_TOKEN")))
+print("OPENAI_API_KEY loaded?", bool(os.getenv("OPENAI_API_KEY")))
 import requests
 import openai
 from fastapi import FastAPI, Query, HTTPException
@@ -8,13 +11,21 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+DEBUG_INIT = os.getenv("DEBUG_INIT", "false").lower() == "true"
+print("⚙️ DEBUG_INIT mode:", DEBUG_INIT)
 from dateutil.parser import isoparse
 
 # —— Load secrets —— 
 load_dotenv()
 HUBSPOT_TOKEN   = os.getenv("HUBSPOT_TOKEN")
 OPENAI_API_KEY  = os.getenv("OPENAI_API_KEY")
-client          = openai.OpenAI(api_key=OPENAI_API_KEY)
+client = None
+if not DEBUG_INIT:
+    client = openai.OpenAI(api_key=OPENAI_API_KEY)
+    print("✅ OpenAI client initialized")
+else:
+    print("🚫 Skipping OpenAI client in DEBUG_INIT mode")
+
 
 # —— FastAPI app with custom OpenAPI —— 
 app = FastAPI(
