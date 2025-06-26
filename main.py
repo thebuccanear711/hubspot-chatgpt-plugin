@@ -220,6 +220,9 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
             closedate=datetime.fromisoformat(cd.replace("Z", "")) if cd else None
 
         ))
+    print(f"Fetched {len(deals)} deals for company ID {company_id}")
+    for d in deals:
+        print(f"  - Deal: {d.name}, Stage: {d.stage}, Closed: {d.closedate}")
     return deals
 
 def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementInfo]:
@@ -274,6 +277,12 @@ def brief(
     closed_lost = [d for d in all_deals if d.stage == "closedlost"]
     expansion   = [d for d in all_deals if d.stage == "expansion"]
     active_deals= [d for d in all_deals if d.stage not in ("closedwon","closedlost","expansion")]
+    print(f"Total deals: {len(all_deals)}")
+    print(f"  Closed-Won: {len(closed_won)}")
+    print(f"  Closed-Lost: {len(closed_lost)}")
+    print(f"  Expansion: {len(expansion)}")
+    print(f"  Active: {len(active_deals)}")
+
     engs        = get_recent_engagements(cid)
     formatted_engagements = format_engagement_summary(engs)
     print("Formatted Engagements:\n", "\n".join(formatted_engagements))
