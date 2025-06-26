@@ -248,7 +248,7 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
 
 def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementInfo]:
     print(f"Getting recent engagements for company ID: {company_id}")
-    url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged?limit={limit}"
+    url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged?limit=100"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
         "Content-Type": "application/json"
@@ -259,16 +259,30 @@ def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementI
     data = r.json()
 
     engs = []
+    count = 0
     for e in data.get("results", []):
         eng = e.get("engagement", {})
         meta = e.get("metadata", {})
 
+        eng_type = eng.get("type", "").lower()
+        if eng_type not in ["call", "email"]:
+            continue
+
+        ts = eng.get("timestamp")
+        created_at = datetime.fromtimestamp(ts / 1000.0) if ts else None
+
+        subject = meta.get("subject") or meta.get("body", "")[:50]
+
         engs.append(EngagementInfo(
             id=str(eng.get("id")),
-            type=eng.get("type", ""),
-            createdAt=datetime.fromtimestamp(eng.get("timestamp") / 1000.0) if eng.get("timestamp") else None,
-            subject=meta.get("subject", "")
+            type=eng.get("type", "").title(),
+            createdAt=created_at,
+            subject=subject
         ))
+
+        count += 1
+        if count >= limit:
+            break
 
     return engs
 
