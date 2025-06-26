@@ -271,7 +271,7 @@ def extract_email_subject(metadata: dict) -> str:
     ).strip()
 
 
-def get_recent_engagements(company_id: str, limit: int = 1000) -> List[EngagementInfo]:
+def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
     print(f"Getting recent engagements for company ID: {company_id}")
     url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
     headers = {
@@ -279,10 +279,9 @@ def get_recent_engagements(company_id: str, limit: int = 1000) -> List[Engagemen
         "Content-Type": "application/json"
     }
 
-    engs = []
+    emails = []
+    calls = []
     offset = None
-    email_count = 0
-    call_count = 0
 
     while True:
         params = {"limit": 100}
@@ -293,44 +292,40 @@ def get_recent_engagements(company_id: str, limit: int = 1000) -> List[Engagemen
         r.raise_for_status()
         data = r.json()
 
-        for e in data.get("results", []):
+        sorted_results = sorted(
+            data.get("results", []),
+            key=lambda e: e.get("engagement", {}).get("timestamp", 0),
+            reverse=True
+        )
+
+        for e in sorted_results:
             eng = e.get("engagement", {})
             meta = e.get("metadata", {})
-
             eng_type = eng.get("type", "").lower()
-            if eng_type not in ["call", "email"]:
-                continue
-
-            if eng_type == "email" and email_count >= 10:
-                continue
-            if eng_type == "call" and call_count >= 10:
-                continue
-
             ts = eng.get("timestamp")
             created_at = datetime.fromtimestamp(ts / 1000.0) if ts else None
             subject = extract_email_subject(meta)
 
-            engs.append(EngagementInfo(
+            entry = EngagementInfo(
                 id=str(eng.get("id")),
                 type=eng.get("type", "").title(),
                 createdAt=created_at,
                 subject=subject
-            ))
+            )
 
-            if eng_type == "email":
-                email_count += 1
-            elif eng_type == "call":
-                call_count += 1
-            
-         
+            if eng_type == "email" and len(emails) < 10:
+                emails.append(entry)
+            elif eng_type == "call" and len(calls) < 10:
+                calls.append(entry)
 
-        if email_count >= 10 and call_count >= 10:
+        if len(emails) >= 10 and len(calls) >= 10:
             break
         if not data.get("hasMore"):
             break
+        print(f"✅ Collected {len(emails)} emails and {len(calls)} calls.")
         offset = data.get("offset")
 
-    return engs
+    return emails + calls
 
 
 def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> List[str]:
