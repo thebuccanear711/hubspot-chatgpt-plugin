@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from dateutil.parser import isoparse
 
 # —— Load secrets —— 
 load_dotenv()
@@ -80,6 +81,7 @@ class CompanyBrief(BaseModel):
     deals_closed_won:   List[DealInfo]
     deals_closed_lost:  List[DealInfo]
     deals_expansion:    List[DealInfo]
+    deals_resurrected:  List[DealInfo]
     deals_active:       List[DealInfo]
     recent_engagements: List[EngagementInfo]
     formatted_engagements: Optional[List[str]] = None
@@ -159,6 +161,21 @@ def get_company_by_domain(domain: str) -> dict:
         "account_status": p.get("2025_account_status")
     }
 
+from functools import lru_cache
+
+@lru_cache()
+def get_stage_label_map() -> dict:
+    url = "https://api.hubapi.com/crm/v3/pipelines/deals"
+    headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}"}
+    r = requests.get(url, headers=headers)
+    r.raise_for_status()
+    data = r.json()
+    stage_map = {}
+    for pipeline in data.get("results", []):
+        for stage in pipeline.get("stages", []):
+            stage_map[stage["id"]] = stage["label"]
+    return stage_map
+
 def get_associated_contacts(company_id: str) -> List[ContactInfo]:
     url = f"https://api.hubapi.com/crm/v3/objects/companies/{company_id}/associations/contacts"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}"}
@@ -209,15 +226,19 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     r = requests.post(url, headers=headers, json=body)
     r.raise_for_status()
     deals = []
+    stage_map = get_stage_label_map()
     for d in r.json().get("results", []):
         p = d["properties"]
         cd = p.get("closedate")
+        stage_id = p.get("dealstage", "")
+        stage_label = stage_map.get(stage_id, stage_id)
+
         deals.append(DealInfo(
             id=d["id"],
             name=p.get("dealname",""),
             amount=float(p.get("amount",0)),
-            stage=p.get("dealstage",""),
-            closedate=datetime.fromisoformat(cd.replace("Z", "")) if cd else None
+            stage=stage_label,
+            closedate=isoparse(cd) if cd else None
 
         ))
     print(f"Fetched {len(deals)} deals for company ID {company_id}")
@@ -273,10 +294,25 @@ def brief(
     cid         = comp_data["id"]
     contacts    = get_associated_contacts(cid)
     all_deals   = get_all_deals_for_company(cid)
-    closed_won  = [d for d in all_deals if d.stage == "closedwon"]
-    closed_lost = [d for d in all_deals if d.stage == "closedlost"]
-    expansion   = [d for d in all_deals if d.stage == "expansion"]
-    active_deals= [d for d in all_deals if d.stage not in ("closedwon","closedlost","expansion")]
+    closed_won = []
+    closed_lost = []
+    expansion = []
+    resurrection = []
+    active_deals = []
+
+    for d in all_deals:
+        stage = d.stage.strip().lower()
+        if stage in ("closed won", "closedwon"):
+            closed_won.append(d)
+        elif stage in ("closed lost", "closedlost"):
+            closed_lost.append(d)
+        elif stage == "expansion/renewal - won":
+            expansion.append(d)
+        elif stage == "resurrected account - won":
+            resurrection.append(d)    
+        else:
+            active_deals.append(d)
+
     print(f"Total deals: {len(all_deals)}")
     print(f"  Closed-Won: {len(closed_won)}")
     print(f"  Closed-Lost: {len(closed_lost)}")
@@ -305,6 +341,7 @@ def brief(
         deals_closed_won=closed_won,
         deals_closed_lost=closed_lost,
         deals_expansion=expansion,
+        deals_resurrected=resurrection,
         deals_active=active_deals,
         recent_engagements=engs,
         formatted_engagements=formatted_engagements
