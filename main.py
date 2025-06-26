@@ -322,9 +322,7 @@ def get_recent_engagements(company_id: str, limit: int = 1000) -> List[Engagemen
             elif eng_type == "call":
                 call_count += 1
             
-            fetched += 1
-            if fetched >= limit:
-                return engs
+         
 
         if email_count >= 10 and call_count >= 10:
             break
