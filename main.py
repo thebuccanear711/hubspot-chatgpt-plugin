@@ -246,43 +246,53 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
         print(f"  - Deal: {d.name}, Stage: {d.stage}, Closed: {d.closedate}")
     return deals
 
-def get_recent_engagements(company_id: str, limit: int = 10) -> List[EngagementInfo]:
+def get_recent_engagements(company_id: str, limit: int = 1000) -> List[EngagementInfo]:
     print(f"Getting recent engagements for company ID: {company_id}")
-    url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged?limit=100"
+    url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
     headers = {
         "Authorization": f"Bearer {HUBSPOT_TOKEN}",
         "Content-Type": "application/json"
     }
 
-    r = requests.get(url, headers=headers)
-    r.raise_for_status()
-    data = r.json()
-
     engs = []
-    count = 0
-    for e in data.get("results", []):
-        eng = e.get("engagement", {})
-        meta = e.get("metadata", {})
+    offset = None
+    fetched = 0
 
-        eng_type = eng.get("type", "").lower()
-        if eng_type not in ["call", "email"]:
-            continue
+    while True:
+        params = {"limit": 100}
+        if offset:
+            params["offset"] = offset
 
-        ts = eng.get("timestamp")
-        created_at = datetime.fromtimestamp(ts / 1000.0) if ts else None
+        r = requests.get(url, headers=headers, params=params)
+        r.raise_for_status()
+        data = r.json()
 
-        subject = meta.get("subject") or meta.get("body", "")[:50]
+        for e in data.get("results", []):
+            eng = e.get("engagement", {})
+            meta = e.get("metadata", {})
 
-        engs.append(EngagementInfo(
-            id=str(eng.get("id")),
-            type=eng.get("type", "").title(),
-            createdAt=created_at,
-            subject=subject
-        ))
+            eng_type = eng.get("type", "").lower()
+            if eng_type not in ["call", "email"]:
+                continue
 
-        count += 1
-        if count >= limit:
+            ts = eng.get("timestamp")
+            created_at = datetime.fromtimestamp(ts / 1000.0) if ts else None
+            subject = meta.get("subject") or meta.get("body", "")[:50]
+
+            engs.append(EngagementInfo(
+                id=str(eng.get("id")),
+                type=eng.get("type", "").title(),
+                createdAt=created_at,
+                subject=subject
+            ))
+
+            fetched += 1
+            if fetched >= limit:
+                return engs
+
+        if not data.get("hasMore"):
             break
+        offset = data.get("offset")
 
     return engs
 
