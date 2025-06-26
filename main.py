@@ -251,7 +251,7 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
         deals.append(DealInfo(
             id=d["id"],
             name=p.get("dealname",""),
-            amount=float(p.get("amount",0)),
+            amount = float(p.get("amount", "0").replace(",", "").strip() or 0),
             stage=stage_label,
             closedate=isoparse(cd) if cd else None
 
@@ -260,6 +260,16 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     for d in deals:
         print(f"  - Deal: {d.name}, Stage: {d.stage}, Closed: {d.closedate}")
     return deals
+
+def extract_email_subject(metadata: dict) -> str:
+    return (
+        metadata.get("subject") or
+        metadata.get("bodyPreview") or
+        metadata.get("body") or
+        metadata.get("text") or
+        str(metadata)[:60]
+    ).strip()
+
 
 def get_recent_engagements(company_id: str, limit: int = 1000) -> List[EngagementInfo]:
     print(f"Getting recent engagements for company ID: {company_id}")
@@ -271,7 +281,8 @@ def get_recent_engagements(company_id: str, limit: int = 1000) -> List[Engagemen
 
     engs = []
     offset = None
-    fetched = 0
+    email_count = 0
+    call_count = 0
 
     while True:
         params = {"limit": 100}
@@ -290,9 +301,14 @@ def get_recent_engagements(company_id: str, limit: int = 1000) -> List[Engagemen
             if eng_type not in ["call", "email"]:
                 continue
 
+            if eng_type == "email" and email_count >= 10:
+                continue
+            if eng_type == "call" and call_count >= 10:
+                continue
+
             ts = eng.get("timestamp")
             created_at = datetime.fromtimestamp(ts / 1000.0) if ts else None
-            subject = meta.get("subject") or meta.get("body", "")[:50]
+            subject = extract_email_subject(meta)
 
             engs.append(EngagementInfo(
                 id=str(eng.get("id")),
@@ -301,10 +317,17 @@ def get_recent_engagements(company_id: str, limit: int = 1000) -> List[Engagemen
                 subject=subject
             ))
 
+            if eng_type == "email":
+                email_count += 1
+            elif eng_type == "call":
+                call_count += 1
+            
             fetched += 1
             if fetched >= limit:
                 return engs
 
+        if email_count >= 10 and call_count >= 10:
+            break
         if not data.get("hasMore"):
             break
         offset = data.get("offset")
