@@ -25,6 +25,10 @@ app = FastAPI(
     redoc_url=None
 )
 
+@app.get("/")
+def read_root():
+    return {"status": "ok"}
+
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
