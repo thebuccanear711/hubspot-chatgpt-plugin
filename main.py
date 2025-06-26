@@ -271,7 +271,7 @@ def extract_email_subject(metadata: dict) -> str:
     ).strip()
 
 
-def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
+def get_recent_engagements(company_id: str, limit: int = 1000) -> List[EngagementInfo]:
     print(f"Getting recent engagements for company ID: {company_id}")
     url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
     headers = {
@@ -279,8 +279,7 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
         "Content-Type": "application/json"
     }
 
-    emails = []
-    calls = []
+    engs = []
     offset = None
 
     while True:
@@ -292,40 +291,37 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
         r.raise_for_status()
         data = r.json()
 
-        sorted_results = sorted(
-            data.get("results", []),
-            key=lambda e: e.get("engagement", {}).get("timestamp", 0),
-            reverse=True
-        )
-
-        for e in sorted_results:
+        for e in data.get("results", []):
             eng = e.get("engagement", {})
             meta = e.get("metadata", {})
             eng_type = eng.get("type", "").lower()
+            if eng_type not in ["call", "email"]:
+                continue
+
             ts = eng.get("timestamp")
             created_at = datetime.fromtimestamp(ts / 1000.0) if ts else None
             subject = extract_email_subject(meta)
 
-            entry = EngagementInfo(
+            engs.append(EngagementInfo(
                 id=str(eng.get("id")),
                 type=eng.get("type", "").title(),
                 createdAt=created_at,
                 subject=subject
-            )
+            ))
 
-            if eng_type == "email" and len(emails) < 10:
-                emails.append(entry)
-            elif eng_type == "call" and len(calls) < 10:
-                calls.append(entry)
-
-        if len(emails) >= 10 and len(calls) >= 10:
-            break
         if not data.get("hasMore"):
             break
-        print(f"✅ Collected {len(emails)} emails and {len(calls)} calls.")
         offset = data.get("offset")
 
+    # ✅ Sort by date descending
+    engs.sort(key=lambda e: e.createdAt or datetime.min, reverse=True)
+
+    # ✅ Most recent 10 emails and 10 calls
+    emails = [e for e in engs if e.type.lower() == "email"][:10]
+    calls = [e for e in engs if e.type.lower() == "call"][:10]
+
     return emails + calls
+
 
 
 def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> List[str]:
