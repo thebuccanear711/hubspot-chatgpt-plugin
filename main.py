@@ -96,7 +96,7 @@ def get_contact_by_email(email: str) -> ContactInfo:
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
     body = {
-        "filterGroups": [{"filters":[{"propertyName":"email","operator":"EQ","value": email}]}],
+        "filterGroups":[{"filters":[{"propertyName":"email","operator":"EQ","value": email}]}],
         "properties": ["firstname","lastname","email","jobtitle"],
         "limit": 1
     }
@@ -105,7 +105,13 @@ def get_contact_by_email(email: str) -> ContactInfo:
     if not results:
         raise HTTPException(404, "Contact not found")
     c = results[0]; p = c["properties"]
-    return ContactInfo(id=c["id"], firstname=p.get("firstname",""), lastname=p.get("lastname",""), email=p.get("email"), jobtitle=p.get("jobtitle"))
+    return ContactInfo(
+        id=c["id"],
+        firstname=p.get("firstname","") or "",
+        lastname=p.get("lastname","") or "",
+        email=p.get("email"),
+        jobtitle=p.get("jobtitle")
+    )
 
 def get_company_by_domain(domain: str) -> dict:
     url = "https://api.hubapi.com/crm/v3/objects/companies/search"
@@ -120,8 +126,9 @@ def get_company_by_domain(domain: str) -> dict:
     if not res:
         raise HTTPException(404, "Company not found")
     c = res[0]; p = c["properties"]
-    return {"id": c["id"], "name": p.get("name"), "domain": domain, "website": p.get("website"),
-            "industry": p.get("industry"), "lifecycle_stage": p.get("lifecyclestage"),
+    return {"id": c["id"], "name": p.get("name"), "domain": domain,
+            "website": p.get("website"), "industry": p.get("industry"),
+            "lifecycle_stage": p.get("lifecyclestage"),
             "account_status": p.get("2025_account_status")}
 
 from functools import lru_cache
@@ -162,8 +169,14 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     url = "https://api.hubapi.com/crm/v3/objects/deals/search"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
     cutoff = int((datetime.utcnow() - timedelta(days=365*3)).timestamp() * 1000)
-    body = {"filterGroups":[{"filters":[{"propertyName":"associations.company","operator":"EQ","value":company_id},{"propertyName":"closedate","operator":"GTE","value":cutoff}]}],
-            "properties":["dealname","amount","dealstage","closedate"], "limit":100}
+    body = {
+        "filterGroups":[{"filters":[
+            {"propertyName":"associations.company","operator":"EQ","value":company_id},
+            {"propertyName":"closedate","operator":"GTE","value":cutoff}
+        ]}],
+        "properties":["dealname","amount","dealstage","closedate"],
+        "limit":100
+    }
     r = requests.post(url, headers=headers, json=body); r.raise_for_status()
     deals, stage_map = [], get_stage_label_map()
     for d in r.json().get("results", []):
@@ -180,7 +193,13 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     return deals
 
 def extract_email_subject(metadata: dict) -> str:
-    return (metadata.get("subject") or metadata.get("bodyPreview") or metadata.get("body") or metadata.get("text") or "").strip() or "(no subject)"
+    # Use subject if present; otherwise use up to first 60 chars of body/preview/text
+    subj = metadata.get("subject")
+    if subj and subj.strip():
+        return subj.strip()
+    fallback = metadata.get("bodyPreview") or metadata.get("body") or metadata.get("text") or ""
+    snippet = fallback.strip()[:60]
+    return snippet or "(no subject)"
 
 def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
     url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
@@ -216,13 +235,14 @@ def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> dic
     for e in engs:
         if e.type == "Email" and cnt_e < limit:
             cnt_e += 1
-            emails.append(f"{cnt_e}. **{e.subject}** – {e.createdAt.strftime('%b %d, %Y')}")
+            emails.append(f"{cnt_e}. {e.createdAt.strftime('%b %d, %Y')} – *{e.subject}*")
         elif e.type == "Call" and cnt_c < limit:
             cnt_c += 1
-            calls.append(f"{cnt_c}. **Type/time:** {e.createdAt.strftime('%b %d, %Y')} – Outcome: {e.subject}")
+            calls.append(f"{cnt_c}. {e.createdAt.strftime('%b %d, %Y')} – {e.subject}")
         if cnt_e >= limit and cnt_c >= limit:
             break
     return {"emails": emails, "calls": calls}
+
 
 @app.get("/brief", response_model=BriefResponse)
 def brief(email: str = Query(...), domain: str = Query(...)):
@@ -244,7 +264,8 @@ def brief(email: str = Query(...), domain: str = Query(...)):
     formatted = format_engagement_summary(engs)
 
     return BriefResponse(
-        contact=contact, company=CompanyBrief(
+        contact=contact,
+        company=CompanyBrief(
             id=cid, name=comp["name"], domain=comp["domain"],
             website=comp.get("website",""), industry=comp.get("industry",""),
             account_status=comp.get("account_status",""), lifecycle_stage=comp.get("lifecycle_stage",""),
