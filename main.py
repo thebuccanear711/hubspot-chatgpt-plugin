@@ -135,6 +135,9 @@ def get_stage_label_map() -> dict:
     return stage_map
 
 def get_contact_by_email(email: str) -> ContactInfo:
+    if not email:
+        raise ValueError("Email must be provided to get_contact_by_email")
+
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
     body = {
@@ -269,17 +272,27 @@ def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> dic
     for e in engs:
         if e.type == "Email" and cnt_e < limit:
             cnt_e += 1
-            emails.append(f"{cnt_e}. Subject: {e.subject} – {e.createdAt.strftime('%b %d, %Y')}")
+            emails.append(f"{cnt_e}. **{e.createdAt.strftime('%Y-%m-%d')}** – {e.subject}")
         elif e.type == "Call" and cnt_c < limit:
             cnt_c += 1
-            calls.append(f"{cnt_c}. Type/time: {e.createdAt.strftime('%b %d, %Y')} – Outcome: {e.subject}")
+            calls.append(f"{cnt_c}. **{e.createdAt.strftime('%Y-%m-%d')}** – {e.subject}")
         if cnt_e >= limit and cnt_c >= limit:
             break
     return {"emails": emails, "calls": calls}
 
 @app.get("/brief", response_model=BriefResponse)
-def brief(email: str = Query(...), domain: str = Query(...)):
-    contact = get_contact_by_email(email)
+def brief(email: str = Query(None), domain: str = Query(...)):
+    if email:
+        contact = get_contact_by_email(email)
+    else:
+        contact = ContactInfo(
+            id="",
+            firstname="",
+            lastname="",
+            email="",
+            jobtitle=""
+        )
+
     comp = get_company_by_domain(domain)
     cid = comp["id"]
 
