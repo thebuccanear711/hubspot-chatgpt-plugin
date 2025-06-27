@@ -150,8 +150,11 @@ def get_associated_contacts(company_id: str) -> List[ContactInfo]:
         p = cr.json()["properties"]
         if p.get("email"):
             contacts.append(ContactInfo(
-                id=cid, firstname=p.get("firstname",""), lastname=p.get("lastname",""),
-                email=p.get("email"), jobtitle=p.get("jobtitle","")
+                id=cid,
+                firstname=str(p.get("firstname") or ""),
+                lastname=str(p.get("lastname") or ""),
+                email=p.get("email"),
+                jobtitle=str(p.get("jobtitle") or "")
             ))
     return contacts
 
