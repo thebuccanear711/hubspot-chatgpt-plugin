@@ -109,7 +109,7 @@ def strip_html(text: str) -> str:
     return re.sub("<[^>]+>", "", text or "").strip()
 
 def extract_email_subject(metadata: dict) -> str:
-    subj = metadata.get("subject")
+    subj = metadata.get("subject") or metadata.get("emailSubject")
     if subj and subj.strip():
         return strip_html(subj)
 
@@ -237,14 +237,17 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     return deals
 
 def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
-    url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
-    engs, offset = [], None
+    engs = []
+
+    # Pull company engagements
+    url_c = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
+    offset = None
     while True:
         params = {"limit": 100}
         if offset:
             params["offset"] = offset
-        r = requests.get(url, headers=headers, params=params); r.raise_for_status()
+        r = requests.get(url_c, headers=headers, params=params); r.raise_for_status()
         data = r.json()
         for e in data.get("results", []):
             eng = e.get("engagement", {})
@@ -263,7 +266,39 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
         if not data.get("hasMore"):
             break
         offset = data.get("offset")
-    engs.sort(key=lambda x: x.createdAt, reverse=True)
+
+    # Pull contacts calls
+    contacts = get_associated_contacts(company_id)
+    for contact in contacts:
+        url_p = f"https://api.hubapi.com/engagements/v1/engagements/associated/contact/{contact.id}/paged"
+        offset = None
+        while True:
+            params = {"limit": 100}
+            if offset:
+                params["offset"] = offset
+            r = requests.get(url_p, headers=headers, params=params); r.raise_for_status()
+            data = r.json()
+            for e in data.get("results", []):
+                eng = e.get("engagement", {})
+                meta = e.get("metadata", {})
+                t = eng.get("type","").lower()
+                if t != "call":
+                    continue
+                ts = eng.get("timestamp")
+                subject = extract_call_outcome(meta)
+                engs.append(EngagementInfo(
+                    id=str(eng.get("id")),
+                    type=eng.get("type").title(),
+                    createdAt=datetime.fromtimestamp(ts/1000.0) if ts else datetime.min,
+                    subject=subject
+                ))
+            if not data.get("hasMore"):
+                break
+            offset = data.get("offset")
+
+    # Deduplicate
+    engs = {e.id: e for e in engs}.values()
+    engs = sorted(engs, key=lambda x: x.createdAt, reverse=True)
     return [e for e in engs if e.type in ("Email","Call")][:20]
 
 def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> dict:
