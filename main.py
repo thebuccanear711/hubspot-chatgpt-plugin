@@ -110,13 +110,15 @@ def strip_html(text: str) -> str:
 
 def extract_email_subject(metadata: dict) -> str:
     subj = metadata.get("subject") or metadata.get("emailSubject")
-    if subj and subj.strip():
-        return strip_html(subj)
+    body_raw = metadata.get("bodyPreview") or metadata.get("body") or metadata.get("text") or ""
+    body_snippet = strip_html(body_raw)[:50]
 
-    fallback = metadata.get("bodyPreview") or metadata.get("body") or metadata.get("text") or ""
-    cleaned = strip_html(fallback)
-    snippet = cleaned[:60]
-    return snippet or "(no subject)"
+    if subj and subj.strip():
+        final = f"{strip_html(subj)}: {body_snippet}" if body_snippet else strip_html(subj)
+    else:
+        final = body_snippet or "(no subject)"
+    
+    return final
 
 def extract_call_outcome(metadata: dict) -> str:
     notes = metadata.get("body") or metadata.get("notes") or metadata.get("title")
