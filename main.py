@@ -99,7 +99,9 @@ class CompanyBrief(BaseModel):
     deals_resurrected:  List[DealInfo]
     deals_active:       List[DealInfo]
     recent_engagements: List[EngagementInfo]
-    formatted_engagements: Optional[List[str]] = None
+    formatted_engagements_emails: Optional[List[str]] = None
+    formatted_engagements_calls: Optional[List[str]] = None
+
 
 class BriefResponse(BaseModel):
     contact: ContactInfo
@@ -248,10 +250,15 @@ def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
         stage_id = p.get("dealstage", "")
         stage_label = stage_map.get(stage_id, stage_id)
 
+        try:
+            amount = float(p.get("amount", "0").replace(",", "").strip())
+        except:
+            amount = 0.0
+        
         deals.append(DealInfo(
             id=d["id"],
             name=p.get("dealname",""),
-            amount = float(p.get("amount", "0").replace(",", "").strip() or 0),
+            amount = amount,
             stage=stage_label,
             closedate=isoparse(cd) if cd else None
 
@@ -324,13 +331,22 @@ def get_recent_engagements(company_id: str, limit: int = 1000) -> List[Engagemen
 
 
 
-def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> List[str]:
-    summary = []
-    for e in sorted(engs, key=lambda x: x.createdAt, reverse=True)[:limit]:
-        date_str = e.createdAt.strftime('%b %d, %Y') if e.createdAt else "Unknown date"
-        subject = e.subject.strip() if e.subject else "No subject"
-        summary.append(f"{date_str} – {e.type.title()} – {subject}")
-    return summary
+def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> dict:
+    emails = []
+    calls = []
+
+    sorted_engs = sorted(engs, key=lambda x: x.createdAt, reverse=True)
+    for e in sorted_engs:
+        line = f"**{e.createdAt.strftime('%b %d, %Y')}** – {e.subject.strip() if e.subject else '(no subject)'}"
+        if e.type.lower() == "email" and len(emails) < limit:
+            emails.append(line)
+        elif e.type.lower() == "call" and len(calls) < limit:
+            calls.append(line)
+
+        if len(emails) >= limit and len(calls) >= limit:
+            break
+
+    return {"emails": emails, "calls": calls}
 
 
 # —— Single “brief” endpoint —— 
@@ -372,7 +388,7 @@ def brief(
 
     engs        = get_recent_engagements(cid)
     formatted_engagements = format_engagement_summary(engs)
-    print("Formatted Engagements:\n", "\n".join(formatted_engagements))
+    print("Formatted Engagements:\n", "\n".join(formatted_engagements["emails"] + formatted_engagements["calls"]))
     for e in engs:
         if not e.subject:
             e.subject = "(no subject logged)"
@@ -395,7 +411,9 @@ def brief(
         deals_resurrected=resurrection,
         deals_active=active_deals,
         recent_engagements=engs,
-        formatted_engagements=formatted_engagements
+        formatted_engagements_emails = formatted_engagements["emails"],
+        formatted_engagements_calls = formatted_engagements["calls"],
+
     )
 
     return BriefResponse(contact=contact, company=company_brief)
