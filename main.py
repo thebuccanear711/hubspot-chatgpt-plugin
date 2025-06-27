@@ -13,6 +13,8 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from dateutil.parser import isoparse
+import re
+from functools import lru_cache
 
 # —— Init & secrets —— 
 DEBUG_INIT = os.getenv("DEBUG_INIT", "false").lower() == "true"
@@ -27,8 +29,13 @@ if not DEBUG_INIT:
 else:
     print("🚫 Skipping OpenAI client in DEBUG_INIT mode")
 
-app = FastAPI(title="HubSpot Briefing", version="1.0.0",
-              openapi_url="/.well-known/openapi.json", docs_url=None, redoc_url=None)
+app = FastAPI(
+    title="HubSpot Briefing",
+    version="1.0.0",
+    openapi_url="/.well-known/openapi.json",
+    docs_url=None,
+    redoc_url=None
+)
 
 @app.get("/")
 def read_root():
@@ -37,9 +44,15 @@ def read_root():
 def custom_openapi():
     if app.openapi_schema:
         return app.openapi_schema
-    schema = get_openapi(title=app.title, version=app.version,
-                         openapi_version=app.openapi_version, routes=app.routes)
-    schema["servers"] = [{"url": "https://hubspot-chatgpt-plugin.onrender.com", "description": "Primary API server"}]
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        openapi_version=app.openapi_version,
+        routes=app.routes,
+    )
+    schema["servers"] = [
+        {"url": "https://hubspot-chatgpt-plugin.onrender.com", "description": "Primary API server"}
+    ]
     app.openapi_schema = schema
     return schema
 
@@ -90,13 +103,42 @@ class BriefResponse(BaseModel):
     contact: ContactInfo
     company: CompanyBrief
 
-# —— HubSpot helpers —— 
+# —— Helpers —— 
+
+def strip_html(text: str) -> str:
+    return re.sub("<[^>]+>", "", text or "").strip()
+
+def extract_email_subject(metadata: dict) -> str:
+    subj = metadata.get("subject")
+    if subj and subj.strip():
+        return strip_html(subj)
+
+    fallback = metadata.get("bodyPreview") or metadata.get("body") or metadata.get("text") or ""
+    cleaned = strip_html(fallback)
+    snippet = cleaned[:60]
+    return snippet or "(no subject)"
+
+def extract_call_outcome(metadata: dict) -> str:
+    notes = metadata.get("body") or metadata.get("notes") or ""
+    cleaned = strip_html(notes)
+    return cleaned or "(no outcome logged)"
+
+@lru_cache()
+def get_stage_label_map() -> dict:
+    url = "https://api.hubapi.com/crm/v3/pipelines/deals"
+    headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}"}
+    r = requests.get(url, headers=headers); r.raise_for_status()
+    stage_map = {}
+    for pipeline in r.json().get("results", []):
+        for stage in pipeline.get("stages", []):
+            stage_map[stage["id"]] = stage["label"]
+    return stage_map
 
 def get_contact_by_email(email: str) -> ContactInfo:
     url = "https://api.hubapi.com/crm/v3/objects/contacts/search"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
     body = {
-        "filterGroups":[{"filters":[{"propertyName":"email","operator":"EQ","value": email}]}],
+        "filterGroups": [{"filters":[{"propertyName":"email","operator":"EQ","value":email}]}],
         "properties": ["firstname","lastname","email","jobtitle"],
         "limit": 1
     }
@@ -110,14 +152,14 @@ def get_contact_by_email(email: str) -> ContactInfo:
         firstname=p.get("firstname","") or "",
         lastname=p.get("lastname","") or "",
         email=p.get("email"),
-        jobtitle=p.get("jobtitle")
+        jobtitle=p.get("jobtitle") or ""
     )
 
 def get_company_by_domain(domain: str) -> dict:
     url = "https://api.hubapi.com/crm/v3/objects/companies/search"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
     body = {
-        "filterGroups":[{"filters":[{"propertyName":"domain","operator":"EQ","value":domain}]}],
+        "filterGroups": [{"filters":[{"propertyName":"domain","operator":"EQ","value":domain}]}],
         "properties": ["name","website","industry","lifecyclestage","2025_account_status"],
         "limit": 1
     }
@@ -126,178 +168,80 @@ def get_company_by_domain(domain: str) -> dict:
     if not res:
         raise HTTPException(404, "Company not found")
     c = res[0]; p = c["properties"]
-    return {"id": c["id"], "name": p.get("name"), "domain": domain,
-            "website": p.get("website"), "industry": p.get("industry"),
-            "lifecycle_stage": p.get("lifecyclestage"),
-            "account_status": p.get("2025_account_status")}
-
-from functools import lru_cache
-@lru_cache()
-def get_stage_label_map() -> dict:
-    url = "https://api.hubapi.com/crm/v3/pipelines/deals"
-    headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}"}
-    r = requests.get(url, headers=headers); r.raise_for_status()
-    data = r.json()
-    out = {}
-    for pipeline in data.get("results", []):
-        for stage in pipeline.get("stages", []):
-            out[stage["id"]] = stage["label"]
-    return out
+    return {
+        "id": c["id"],
+        "name": p.get("name") or "",
+        "domain": domain,
+        "website": p.get("website") or "",
+        "industry": p.get("industry") or "",
+        "lifecycle_stage": p.get("lifecyclestage") or "",
+        "account_status": p.get("2025_account_status") or ""
+    }
 
 def get_associated_contacts(company_id: str) -> List[ContactInfo]:
     url = f"https://api.hubapi.com/crm/v3/objects/companies/{company_id}/associations/contacts"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}"}
-    r = requests.get(url, headers=headers); r.raise_for_status()
     contacts = []
-    for assoc in r.json().get("results", []):
+    for assoc in requests.get(url, headers=headers).json().get("results", []):
         cid = assoc["id"]
-        cr = requests.get(f"https://api.hubapi.com/crm/v3/objects/contacts/{cid}",
-                          headers=headers, params={"properties":"firstname,lastname,email,jobtitle"})
-        cr.raise_for_status()
+        cr = requests.get(
+            f"https://api.hubapi.com/crm/v3/objects/contacts/{cid}",
+            headers=headers,
+            params={"properties":"firstname,lastname,email,jobtitle"}
+        ); cr.raise_for_status()
         p = cr.json()["properties"]
-        if p.get("email"):
+        email = p.get("email")
+        if email:
             contacts.append(ContactInfo(
                 id=cid,
-                firstname=str(p.get("firstname") or ""),
-                lastname=str(p.get("lastname") or ""),
-                email=p.get("email"),
-                jobtitle=str(p.get("jobtitle") or "")
+                firstname=str(p.get("firstname","") or ""),
+                lastname=str(p.get("lastname","") or ""),
+                email=email,
+                jobtitle=str(p.get("jobtitle","") or "")
             ))
     return contacts
 
 def get_all_deals_for_company(company_id: str) -> List[DealInfo]:
     url = "https://api.hubapi.com/crm/v3/objects/deals/search"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
-    cutoff = int((datetime.utcnow() - timedelta(days=365*3)).timestamp() * 1000)
+    cutoff = int((datetime.utcnow() - timedelta(days=365 * 3)).timestamp() * 1000)
     body = {
-        "filterGroups":[{"filters":[
-            {"propertyName":"associations.company","operator":"EQ","value":company_id},
-            {"propertyName":"closedate","operator":"GTE","value":cutoff}
-        ]}],
-        "properties":["dealname","amount","dealstage","closedate"],
-        "limit":100
+        "filterGroups": [{
+            "filters": [
+                {"propertyName":"associations.company","operator":"EQ","value":company_id},
+                {"propertyName":"closedate","operator":"GTE","value":cutoff}
+            ]
+        }],
+        "properties": ["dealname","amount","dealstage","closedate"],
+        "limit": 100
     }
     r = requests.post(url, headers=headers, json=body); r.raise_for_status()
-    deals, stage_map = [], get_stage_label_map()
+    deals = []
+    stage_map = get_stage_label_map()
     for d in r.json().get("results", []):
         p = d["properties"]
         try:
-            amt = float(p.get("amount", "0").replace(",", "").strip())
+            amt = float(str(p.get("amount","0")).replace(",", "").strip())
         except:
             amt = 0.0
         deals.append(DealInfo(
-            id=d["id"], name=p.get("dealname",""), amount=amt,
+            id=d["id"],
+            name=p.get("dealname","") or "",
+            amount=amt,
             stage=stage_map.get(p.get("dealstage",""), p.get("dealstage","")),
             closedate=isoparse(p["closedate"]) if p.get("closedate") else None
         ))
     return deals
-
-def extract_email_subject(metadata: dict) -> str:
-    # Use subject if present; otherwise use up to first 60 chars of body/preview/text
-    subj = metadata.get("subject")
-    if subj and subj.strip():
-        return subj.strip()
-    fallback = metadata.get("bodyPreview") or metadata.get("body") or metadata.get("text") or ""
-    snippet = fallback.strip()[:60]
-    return snippet or "(no subject)"
 
 def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
     url = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
     engs, offset = [], None
     while True:
-        params = {"limit":100}
-        if offset: params["offset"] = offset
+        params = {"limit": 100}
+        if offset:
+            params["offset"] = offset
         r = requests.get(url, headers=headers, params=params); r.raise_for_status()
         data = r.json()
         for e in data.get("results", []):
-            eng, meta = e.get("engagement", {}), e.get("metadata", {})
-            t = eng.get("type","").lower()
-            if t not in ("email", "call"):
-                continue
-            ts = eng.get("timestamp")
-            engs.append(EngagementInfo(
-                id=str(eng.get("id")), type=eng.get("type").title(),
-                createdAt=datetime.fromtimestamp(ts/1000.0) if ts else datetime.min,
-                subject=extract_email_subject(meta)
-            ))
-        if not data.get("hasMore"):
-            break
-        offset = data.get("offset")
-    engs.sort(key=lambda x: x.createdAt or datetime.min, reverse=True)
-    emails = [e for e in engs if e.type == "Email"][:10]
-    calls  = [e for e in engs if e.type == "Call"][:10]
-    return emails + calls
-
-def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> dict:
-    emails, calls = [], []
-    cnt_e = cnt_c = 0
-    for e in engs:
-        if e.type == "Email" and cnt_e < limit:
-            cnt_e += 1
-            emails.append(f"{cnt_e}. {e.createdAt.strftime('%b %d, %Y')} – *{e.subject}*")
-        elif e.type == "Call" and cnt_c < limit:
-            cnt_c += 1
-            calls.append(f"{cnt_c}. {e.createdAt.strftime('%b %d, %Y')} – {e.subject}")
-        if cnt_e >= limit and cnt_c >= limit:
-            break
-    return {"emails": emails, "calls": calls}
-
-
-@app.get("/brief", response_model=BriefResponse)
-def brief(email: str = Query(...), domain: str = Query(...)):
-    contact = get_contact_by_email(email)
-    comp = get_company_by_domain(domain)
-    cid = comp["id"]
-    contacts = get_associated_contacts(cid)
-    deals = get_all_deals_for_company(cid)
-    cw, cl, exp, res, act = [], [], [], [], []
-    for d in deals:
-        st = d.stage.lower()
-        if "closed won" in st: cw.append(d)
-        elif "closed lost" in st: cl.append(d)
-        elif "expansion" in st: exp.append(d)
-        elif "resurrected" in st: res.append(d)
-        else: act.append(d)
-
-    engs = get_recent_engagements(cid)
-    formatted = format_engagement_summary(engs)
-
-    return BriefResponse(
-        contact=contact,
-        company=CompanyBrief(
-            id=cid, name=comp["name"], domain=comp["domain"],
-            website=comp.get("website",""), industry=comp.get("industry",""),
-            account_status=comp.get("account_status",""), lifecycle_stage=comp.get("lifecycle_stage",""),
-            contacts=contacts, deals_closed_won=cw, deals_closed_lost=cl,
-            deals_expansion=exp, deals_resurrected=res, deals_active=act,
-            recent_engagements=engs,
-            formatted_engagements_emails=formatted["emails"],
-            formatted_engagements_calls=formatted["calls"]
-        )
-    )
-
-# —— Plugin metadata —— 
-
-@app.get("/.well-known/ai-plugin.json")
-def serve_manifest():
-    return {
-        "schema_version":"v1","name_for_human":"HubSpot Briefing",
-        "name_for_model":"hubspot_briefing","description_for_human":"…",
-        "description_for_model":"…","auth":{"type":"none"},
-        "api":{"type":"openapi","url":"https://hubspot-chatgpt-plugin.onrender.com/.well-known/openapi.json"},
-        "logo_url":"https://hubspot-chatgpt-plugin.onrender.com/logo.png","contact_email":"you@example.com",
-        "legal_info_url":"https://hubspot-chatgpt-plugin.onrender.com/legal"
-    }
-
-@app.get("/logo.png")
-def logo():
-    return HTMLResponse('<img src="https://via.placeholder.com/100" alt="logo">')
-
-@app.get("/legal", response_class=HTMLResponse)
-def legal():
-    return "<p>This plugin stores no data and is for internal use only.</p>"
-
-@app.get("/openapi.json")
-def openapi_redirect():
-    return custom_openapi()
+            eng = e.get("eng
