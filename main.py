@@ -240,7 +240,9 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
     headers = {"Authorization": f"Bearer {HUBSPOT_TOKEN}", "Content-Type": "application/json"}
     engs = []
 
-    # Pull company engagements
+    print(f"🔍 DEBUG: Pulling engagements for company ID {company_id}")
+
+    # Company-level engagements
     url_c = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
     offset = None
     while True:
@@ -253,9 +255,10 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
             eng = e.get("engagement", {})
             meta = e.get("metadata", {})
             t = eng.get("type","").lower()
+            ts = eng.get("timestamp")
+            print(f"📌 [COMPANY] ID: {eng.get('id')} TYPE: {t} TIME: {ts} META: {meta}")
             if t not in ("email", "call"):
                 continue
-            ts = eng.get("timestamp")
             subject = extract_email_subject(meta) if t == "email" else extract_call_outcome(meta)
             engs.append(EngagementInfo(
                 id=str(eng.get("id")),
@@ -265,131 +268,4 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
             ))
         if not data.get("hasMore"):
             break
-        offset = data.get("offset")
-
-    # Pull contacts calls
-    contacts = get_associated_contacts(company_id)
-    for contact in contacts:
-        url_p = f"https://api.hubapi.com/engagements/v1/engagements/associated/contact/{contact.id}/paged"
-        offset = None
-        while True:
-            params = {"limit": 100}
-            if offset:
-                params["offset"] = offset
-            r = requests.get(url_p, headers=headers, params=params); r.raise_for_status()
-            data = r.json()
-            for e in data.get("results", []):
-                eng = e.get("engagement", {})
-                meta = e.get("metadata", {})
-                t = eng.get("type","").lower()
-                if t != "call":
-                    continue
-                ts = eng.get("timestamp")
-                subject = extract_call_outcome(meta)
-                engs.append(EngagementInfo(
-                    id=str(eng.get("id")),
-                    type=eng.get("type").title(),
-                    createdAt=datetime.fromtimestamp(ts/1000.0) if ts else datetime.min,
-                    subject=subject
-                ))
-            if not data.get("hasMore"):
-                break
-            offset = data.get("offset")
-
-    # Deduplicate
-    engs = {e.id: e for e in engs}.values()
-    engs = sorted(engs, key=lambda x: x.createdAt, reverse=True)
-    return [e for e in engs if e.type in ("Email","Call")][:20]
-
-def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> dict:
-    emails, calls = [], []
-    cnt_e = cnt_c = 0
-    for e in engs:
-        if e.type == "Email" and cnt_e < limit:
-            cnt_e += 1
-            emails.append(f"{cnt_e}. **{e.createdAt.strftime('%Y-%m-%d')}** – {e.subject}")
-        elif e.type == "Call" and cnt_c < limit:
-            cnt_c += 1
-            calls.append(f"{cnt_c}. **{e.createdAt.strftime('%Y-%m-%d')}** – {e.subject}")
-        if cnt_e >= limit and cnt_c >= limit:
-            break
-    return {"emails": emails, "calls": calls}
-
-@app.get("/brief", response_model=BriefResponse)
-def brief(email: str = Query(None), domain: str = Query(...)):
-    if email:
-        contact = get_contact_by_email(email)
-    else:
-        contact = ContactInfo(
-            id="",
-            firstname="",
-            lastname="",
-            email="",
-            jobtitle=""
-        )
-
-    comp = get_company_by_domain(domain)
-    cid = comp["id"]
-
-    contacts = get_associated_contacts(cid)
-    deals = get_all_deals_for_company(cid)
-    cw, cl, exp, res, act = [], [], [], [], []
-    for d in deals:
-        st = d.stage.lower()
-        if "closed won" in st: cw.append(d)
-        elif "closed lost" in st: cl.append(d)
-        elif "expansion" in st: exp.append(d)
-        elif "resurrected" in st: res.append(d)
-        else: act.append(d)
-
-    engs = get_recent_engagements(cid)
-    formatted = format_engagement_summary(engs)
-
-    return BriefResponse(
-        contact=contact,
-        company=CompanyBrief(
-            id=cid,
-            name=comp["name"],
-            domain=comp["domain"],
-            website=comp.get("website", ""),
-            industry=comp.get("industry", ""),
-            account_status=comp.get("account_status", ""),
-            lifecycle_stage=comp.get("lifecycle_stage", ""),
-            contacts=contacts,
-            deals_closed_won=cw,
-            deals_closed_lost=cl,
-            deals_expansion=exp,
-            deals_resurrected=res,
-            deals_active=act,
-            recent_engagements=engs,
-            formatted_engagements_emails=formatted["emails"],
-            formatted_engagements_calls=formatted["calls"]
-        )
-    )
-
-@app.get("/.well-known/ai-plugin.json")
-def serve_manifest():
-    return {
-        "schema_version":"v1",
-        "name_for_human":"HubSpot Briefing",
-        "name_for_model":"hubspot_briefing",
-        "description_for_human":"Fetch recent deals, emails, and call outcomes.",
-        "description_for_model":"Use /brief to return contact info, deals, and summaries of emails and calls.",
-        "auth":{"type":"none"},
-        "api":{"type":"openapi","url":"https://hubspot-chatgpt-plugin.onrender.com/.well-known/openapi.json"},
-        "logo_url":"https://hubspot-chatgpt-plugin.onrender.com/logo.png",
-        "contact_email":"you@example.com",
-        "legal_info_url":"https://hubspot-chatgpt-plugin.onrender.com/legal"
-    }
-
-@app.get("/logo.png")
-def logo():
-    return HTMLResponse('<img src="https://via.placeholder.com/100" alt="logo">')
-
-@app.get("/legal", response_class=HTMLResponse)
-def legal():
-    return "<p>This plugin stores no data and is for internal use only.</p>"
-
-@app.get("/openapi.json")
-def openapi_redirect():
-    return custom_openapi()
+        offset = data.get("offs
