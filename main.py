@@ -16,7 +16,7 @@ from dateutil.parser import isoparse
 import re
 from functools import lru_cache
 
-# —— Init & secrets —— 
+# —— Init & secrets ——
 DEBUG_INIT = os.getenv("DEBUG_INIT", "false").lower() == "true"
 print("⚙️ DEBUG_INIT mode:", DEBUG_INIT)
 load_dotenv()
@@ -58,7 +58,7 @@ def custom_openapi():
 
 app.openapi = custom_openapi
 
-# —— Models —— 
+# —— Models ——
 
 class ContactInfo(BaseModel):
     id: str
@@ -103,7 +103,7 @@ class BriefResponse(BaseModel):
     contact: ContactInfo
     company: CompanyBrief
 
-# —— Helpers —— 
+# —— Helpers ——
 
 def strip_html(text: str) -> str:
     return re.sub("<[^>]+>", "", text or "").strip()
@@ -119,7 +119,7 @@ def extract_email_subject(metadata: dict) -> str:
     return snippet or "(no subject)"
 
 def extract_call_outcome(metadata: dict) -> str:
-    notes = metadata.get("body") or metadata.get("notes") or ""
+    notes = metadata.get("body") or metadata.get("notes") or metadata.get("title")
     cleaned = strip_html(notes)
     return cleaned or "(no outcome logged)"
 
@@ -242,7 +242,7 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
 
     print(f"🔍 DEBUG: Pulling engagements for company ID {company_id}")
 
-    # Company-level engagements
+    # Company-level
     url_c = f"https://api.hubapi.com/engagements/v1/engagements/associated/company/{company_id}/paged"
     offset = None
     while True:
@@ -256,7 +256,7 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
             meta = e.get("metadata", {})
             t = eng.get("type","").lower()
             ts = eng.get("timestamp")
-            print(f"📌 [COMPANY] ID: {eng.get('id')} TYPE: {t} TIME: {ts} META: {meta}")
+            print(f"📌 [COMPANY] ID: {eng.get('id')} TYPE: {t} META: {meta}")
             if t not in ("email", "call"):
                 continue
             subject = extract_email_subject(meta) if t == "email" else extract_call_outcome(meta)
@@ -270,7 +270,7 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
             break
         offset = data.get("offset")
 
-    # Contacts-level calls
+    # Contact-level calls
     contacts = get_associated_contacts(company_id)
     for contact in contacts:
         print(f"🔍 DEBUG: Pulling calls for contact ID {contact.id}")
@@ -287,7 +287,7 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
                 meta = e.get("metadata", {})
                 t = eng.get("type","").lower()
                 ts = eng.get("timestamp")
-                print(f"📌 [CONTACT] ID: {eng.get('id')} TYPE: {t} TIME: {ts} META: {meta}")
+                print(f"📌 [CONTACT] ID: {eng.get('id')} TYPE: {t} META: {meta}")
                 if t != "call":
                     continue
                 subject = extract_call_outcome(meta)
@@ -303,7 +303,6 @@ def get_recent_engagements(company_id: str) -> List[EngagementInfo]:
 
     engs = {e.id: e for e in engs}.values()
     engs = sorted(engs, key=lambda x: x.createdAt, reverse=True)
-    print(f"✅ DEBUG: Final deduped engagements count: {len(engs)}")
     return [e for e in engs if e.type in ("Email","Call")][:20]
 
 def format_engagement_summary(engs: List[EngagementInfo], limit: int = 5) -> dict:
@@ -325,13 +324,7 @@ def brief(email: str = Query(None), domain: str = Query(...)):
     if email:
         contact = get_contact_by_email(email)
     else:
-        contact = ContactInfo(
-            id="",
-            firstname="",
-            lastname="",
-            email="",
-            jobtitle=""
-        )
+        contact = ContactInfo(id="", firstname="", lastname="", email="", jobtitle="")
 
     comp = get_company_by_domain(domain)
     cid = comp["id"]
